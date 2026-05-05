@@ -1,0 +1,9 @@
+<root>
+  <BehaviorTree ID="VisitWaypoint">
+    <Sequence name="Inspect">
+      <Action ID="CheckOccupancy" waypoint="{waypoint}"/>
+      <Action ID="ManageLight"    waypoint="{waypoint}"/>
+      <Action ID="ResolveEnergy"  waypoint="{waypoint}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
