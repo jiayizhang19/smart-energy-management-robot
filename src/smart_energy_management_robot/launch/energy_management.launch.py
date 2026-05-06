@@ -7,9 +7,9 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
-    pkg      = get_package_share_directory('smart_energy_management_robot')
+    pkg = get_package_share_directory('smart_energy_management_robot')
     pkg_nav2 = get_package_share_directory('nav2_bringup')
-    pkg_tb3  = get_package_share_directory('turtlebot3_gazebo')
+    pkg_tb3 = get_package_share_directory('turtlebot3_gazebo')
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -31,7 +31,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(
                 get_package_share_directory('plansys2_bringup'),
-                'launch', 'plansys2_bringup_launch_monolithic.py'  # fixed name
+                'launch', 
+                'plansys2_bringup_launch_monolithic.py'
             )
         ),
         launch_arguments={

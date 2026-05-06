@@ -66,10 +66,15 @@ source install/setup.bash
 Stage 2 - Test Order
 1. Gazebo
 ```bash
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
 ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 ```
-2. Navigation
+2. Nav2 with RViz
 ```bash
+source /opt/ros/humble/setup.bash
+source ~/Zhang_25252980_EE650_ws/install/setup.bash
+export TURTLEBOT3_MODEL=burger
 ros2 launch turtlebot3_navigation2 navigation2.launch.py \
   map:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/Maps/house_explored.yaml \
   use_sim_time:=True
@@ -79,10 +84,23 @@ ros2 launch turtlebot3_navigation2 navigation2.launch.py \
 ros2 launch plansys2_bringup plansys2_bringup_launch_monolithic.py \
   model_file:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/pddl/domain.pddl
 ```
+What you should see (All four components must show Activated before moving on.)
+```bash
+[plansys2_node-1] [domain_expert]: [domain_expert] Activated
+[plansys2_node-1] [problem_expert]: [problem_expert] Activated
+[plansys2_node-1] [planner]: [planner] Activated
+[plansys2_node-1] [executor]: [executor] Activated
+```
 4. Action Executor
 ```bash
 ros2 run smart_energy_management_robot visit_action_executor.py
 ```
+What you should see
+```bash
+[visit_action_executor]: VisitActionExecutor ready
+# Then it waits silently for actions from PlanSys2.
+```
+
 5. Problem Generator (trigger the plan)
 ```bash
 ros2 run smart_energy_management_robot problem_generator.py
