@@ -11,6 +11,7 @@
     (high_energy_active)
     (is_critical_wp ?wp - waypoint)
     (is_high_wp ?wp - waypoint)
+    (priorities_cleared)
   )
 
   (:action visit_critical
@@ -43,6 +44,7 @@
       (not (robot_at ?from))
       (visited ?to)
       (not (high_energy_active))
+      (priorities_cleared)
     )
   )
 
@@ -52,8 +54,7 @@
       (robot_at ?from)
       (connected ?from ?to)
       (not (visited ?to))
-      (not (critical_energy_active))
-      (not (high_energy_active))
+      (priorities_cleared)
     )
     :effect (and
       (robot_at ?to)

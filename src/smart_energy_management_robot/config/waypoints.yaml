@@ -1,6 +1,7 @@
 waypoints:
-  living_room:  [1.2,  -0.5]
-  kitchen:      [2.5,   1.0]
-  bedroom:      [-1.5,  2.0]
-  hallway:      [0.0,   0.0]
-  entrance:     [-2.0, -1.0]
+  living_room:  [-2.84,  3.08]
+  kitchen:      [-6.46,   -1.56]
+  bedroom:      [3.10,  2.60]
+  bathroom:      [6.42,   -2.76]
+  entrance:     [-0.01, -2.91]
+  balcony:      [-6.53,  3.06]

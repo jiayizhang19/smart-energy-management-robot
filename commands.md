@@ -1,3 +1,4 @@
+### Preparation:
 Stage 1 — Test Gazebo House World
 Open a new terminal:
 ```bash
@@ -7,7 +8,7 @@ ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 ```
 Verify the Gazebo window opens with the house environment and the robot spawns. Share a screenshot or confirm it works before moving to Stage 2.
 
-Stage 2 — Test PlanSys2 With Our Domain
+Optional — Test PlanSys2 With Our Domain
 Open another new terminal:
 ```bash
 source /opt/ros/humble/setup.bash
@@ -23,7 +24,14 @@ ros2 service call /domain_expert/get_domain \
 ```
 You should see your domain PDDL returned in the response.
 
-Stage 3 — Test Nav2
+Stage 2 - Set initial position in RViz
+```bash
+source /opt/ros/humble/setup.bash
+ros2 run rviz2 rviz2 -d /opt/ros/humble/share/nav2_bringup/rviz/nav2_default_view.rviz
+```
+Click 2D Pose Estimate button on RViz, then click on the map and drag in the rough direction it faces.
+
+Stage 3 — Nav2
 Open another terminal:
 ```bash
 source /opt/ros/humble/setup.bash
@@ -33,4 +41,49 @@ ros2 launch nav2_bringup bringup_launch.py \
   map:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/Maps/house_explored.yaml \
   use_sim_time:=True
 ```
-RViz should open showing the map. Set the 2D Pose Estimate in RViz to align the robot with the map.
+/amcl_pose is published by Nav2
+
+Stage 4 - Get the location
+```bash
+source /opt/ros/humble/setup.bash
+ros2 topic echo /odom --once
+```
+
+Stage 5 - teleop 
+```bash
+source /opt/ros/humble/setup.bash
+ros2 run turtlebot3_teleop teleop_keyboard
+```
+
+
+### Execution
+Stage 1 - Rebuild
+```bash
+cd ~/Zhang_25252980_EE650_ws
+colcon build --packages-select smart_energy_management_robot
+source install/setup.bash
+```
+Stage 2 - Test Order
+1. Gazebo
+```bash
+ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
+```
+2. Navigation
+```bash
+ros2 launch turtlebot3_navigation2 navigation2.launch.py \
+  map:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/Maps/house_explored.yaml \
+  use_sim_time:=True
+```
+3. PlanSys2
+```bash
+ros2 launch plansys2_bringup plansys2_bringup_launch_monolithic.py \
+  model_file:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/pddl/domain.pddl
+```
+4. Action Executor
+```bash
+ros2 run smart_energy_management_robot visit_action_executor.py
+```
+5. Problem Generator (trigger the plan)
+```bash
+ros2 run smart_energy_management_robot problem_generator.py
+```

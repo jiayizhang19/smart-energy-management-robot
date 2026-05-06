@@ -4,6 +4,7 @@ import random
 import yaml
 import os
 import rclpy
+import time
 
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
@@ -35,7 +36,6 @@ class ProblemGenerator(Node):
         return list(data['waypoints'].keys())
 
     def setup_and_trigger(self):
-        # randomly assign start, critical, high waypoints
         shuffled = random.sample(self.waypoints, len(self.waypoints))
         start_wp    = shuffled[0]
         critical_wp = shuffled[1]
@@ -45,10 +45,8 @@ class ProblemGenerator(Node):
         self.get_logger().info(f'Critical waypoint: {critical_wp}')
         self.get_logger().info(f'High waypoint:     {high_wp}')
 
-        # build objects string
         objects = '  ' + ' '.join(self.waypoints) + ' - waypoint'
 
-        # build init predicates
         init_lines = [f'  (robot_at {start_wp})']
         init_lines.append('  (critical_energy_active)')
         init_lines.append('  (high_energy_active)')
@@ -59,15 +57,13 @@ class ProblemGenerator(Node):
                 if wp1 != wp2:
                     init_lines.append(f'  (connected {wp1} {wp2})')
 
-        # build goal string
+        # goal uses priorities_cleared instead of (not ...)
         goal_lines = ['  (and']
         for wp in self.waypoints:
             goal_lines.append(f'    (visited {wp})')
-        goal_lines.append('    (not (critical_energy_active))')
-        goal_lines.append('    (not (high_energy_active))')
+        goal_lines.append('    (priorities_cleared)')
         goal_lines.append('  )')
 
-        # assemble full PDDL problem string
         problem = (
             '(define (problem energy_problem)\n'
             '  (:domain energy_management)\n'
@@ -85,7 +81,6 @@ class ProblemGenerator(Node):
 
         self.get_logger().info(f'Problem:\n{problem}')
 
-        # send problem to PlanSys2
         self.add_problem_cli.wait_for_service(timeout_sec=10.0)
         req = AddProblem.Request()
         req.problem = problem
@@ -120,7 +115,7 @@ class ProblemGenerator(Node):
 
     def _feedback_cb(self, feedback):
         self.get_logger().info(
-            f'Executing action: {feedback.feedback.action_execution_status}'
+            f'Executing: {feedback.feedback.action_execution_status}'
         )
 
     def _result_cb(self, future):
@@ -135,8 +130,6 @@ def main():
     rclpy.init()
     node = ProblemGenerator()
     node.get_logger().info('Waiting for PlanSys2...')
-    # give PlanSys2 time to start up
-    import time
     time.sleep(3.0)
     node.setup_and_trigger()
     rclpy.spin(node)
