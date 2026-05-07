@@ -5,13 +5,14 @@ import os
 import yaml
 import py_trees
 import rclpy
+import time
 
 from rclpy.node import Node
-from rclpy.action import ActionClient
+from rclpy.action import ActionServer, ActionClient
 from nav2_msgs.action import NavigateToPose
 from geometry_msgs.msg import PoseStamped
 from ament_index_python.packages import get_package_share_directory
-from plansys2_msgs.msg import ActionExecution
+from plansys2_msgs.action import ExecutePlan
 
 sys.path.insert(0, os.path.join(
     get_package_share_directory('smart_energy_management_robot'), 'src'
@@ -28,67 +29,66 @@ def load_waypoints():
 
 
 class VisitActionExecutor(Node):
-    """
-    Listens to PlanSys2 action dispatch topic.
-    When a visit action is received, navigates to the waypoint
-    then runs the inspection BT.
-    """
 
     def __init__(self):
         super().__init__('visit_action_executor')
         self.waypoints = load_waypoints()
-        self.nav_done = False
-        self.nav_success = False
-        self.current_action = None
 
-        # subscribe to PlanSys2 action execution topic
+        # nav2 client
+        self.nav_client = ActionClient(
+            self, NavigateToPose, 'navigate_to_pose'
+        )
+
+        # create one action server per PDDL action
+        # PlanSys2 calls these when executing the plan
+        from plansys2_msgs.action import ExecutePlan
+        
+        # use actions_hub topic approach with ActionExecution
+        from plansys2_msgs.msg import ActionExecution
+        
         self.action_sub = self.create_subscription(
             ActionExecution,
             'actions_hub',
             self._action_cb,
             10
         )
-
-        # publish action execution responses back to PlanSys2
         self.action_pub = self.create_publisher(
             ActionExecution,
             'actions_hub',
             10
         )
 
-        # Nav2 action client
-        self.nav_client = ActionClient(
-            self,
-            NavigateToPose,
-            'navigate_to_pose'
-        )
-
+        self.current_action = None
         self.get_logger().info('VisitActionExecutor ready')
 
     def _action_cb(self, msg):
-        # only handle REQUEST messages for our actions
+        from plansys2_msgs.msg import ActionExecution
+        
         if msg.type != ActionExecution.REQUEST:
             return
         if msg.action not in ['visit_critical', 'visit_high', 'visit_waypoint']:
             return
+        if msg.node_id == self.get_name():
+            return  # ignore our own messages
 
         self.current_action = msg
-        # target waypoint is second argument (from, to)
         target = msg.arguments[1]
+        
         self.get_logger().info(
             f'Received action: {msg.action} -> {target}'
         )
 
-        # send CONFIRM back to PlanSys2
-        self._send_response(ActionExecution.CONFIRM, target, 0.0, 'Navigating')
-        self.nav_done = False
-        self.nav_success = False
-        self._navigate(target)
+        # confirm to PlanSys2 we are handling this
+        self._send_response(ActionExecution.RESPONSE, target, 0.0, 'Starting')
+        
+        # navigate then inspect
+        self._navigate_and_inspect(target)
 
-    def _navigate(self, waypoint: str):
+    def _navigate_and_inspect(self, waypoint: str):
         coords = self.waypoints.get(waypoint)
         if coords is None:
             self.get_logger().error(f'Unknown waypoint: {waypoint}')
+            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Unknown waypoint', False
             )
@@ -97,11 +97,15 @@ class VisitActionExecutor(Node):
         goal = NavigateToPose.Goal()
         goal.pose = PoseStamped()
         goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
         goal.pose.pose.position.x = float(coords[0])
         goal.pose.pose.position.y = float(coords[1])
         goal.pose.pose.orientation.w = 1.0
 
-        self.get_logger().info(f'Navigating to {waypoint} {coords}')
+        self.get_logger().info(
+            f'Navigating to {waypoint} at {coords}'
+        )
+
         self.nav_client.wait_for_server()
         future = self.nav_client.send_goal_async(goal)
         future.add_done_callback(
@@ -111,7 +115,8 @@ class VisitActionExecutor(Node):
     def _nav_response_cb(self, future, waypoint):
         goal_handle = future.result()
         if not goal_handle.accepted:
-            self.get_logger().error('Navigation goal rejected')
+            self.get_logger().error('Navigation rejected')
+            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Nav rejected', False
             )
@@ -122,12 +127,14 @@ class VisitActionExecutor(Node):
 
     def _nav_result_cb(self, future, waypoint):
         self.get_logger().info(f'Arrived at {waypoint}')
+        from plansys2_msgs.msg import ActionExecution
         self._send_response(
             ActionExecution.FEEDBACK, waypoint, 0.5, 'Arrived, inspecting'
         )
         self._run_inspection(waypoint)
 
     def _run_inspection(self, waypoint: str):
+        from plansys2_msgs.msg import ActionExecution
         tree = create_inspection_tree(waypoint)
         tree.setup_with_descendants()
         tree.tick_once()
@@ -140,10 +147,11 @@ class VisitActionExecutor(Node):
         else:
             self.get_logger().error(f'Inspection failed: {waypoint}')
             self._send_response(
-                ActionExecution.FINISH, waypoint, 0.0, 'Inspection failed', False
+                ActionExecution.FINISH, waypoint, 0.0, 'Failed', False
             )
 
     def _send_response(self, msg_type, waypoint, completion, status, success=True):
+        from plansys2_msgs.msg import ActionExecution
         if self.current_action is None:
             return
         msg = ActionExecution()

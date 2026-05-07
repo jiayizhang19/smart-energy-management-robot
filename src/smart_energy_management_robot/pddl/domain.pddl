@@ -1,8 +1,6 @@
 (define (domain energy_management)
   (:requirements :strips :typing)
-
   (:types waypoint)
-
   (:predicates
     (robot_at ?wp - waypoint)
     (visited ?wp - waypoint)
@@ -11,9 +9,9 @@
     (high_energy_active)
     (is_critical_wp ?wp - waypoint)
     (is_high_wp ?wp - waypoint)
+    (critical_done)
     (priorities_cleared)
   )
-
   (:action visit_critical
     :parameters (?from ?to - waypoint)
     :precondition (and
@@ -27,9 +25,9 @@
       (not (robot_at ?from))
       (visited ?to)
       (not (critical_energy_active))
+      (critical_done)
     )
   )
-
   (:action visit_high
     :parameters (?from ?to - waypoint)
     :precondition (and
@@ -37,7 +35,7 @@
       (connected ?from ?to)
       (is_high_wp ?to)
       (high_energy_active)
-      (not (critical_energy_active))
+      (critical_done)
     )
     :effect (and
       (robot_at ?to)
@@ -47,13 +45,11 @@
       (priorities_cleared)
     )
   )
-
   (:action visit_waypoint
     :parameters (?from ?to - waypoint)
     :precondition (and
       (robot_at ?from)
       (connected ?from ?to)
-      (not (visited ?to))
       (priorities_cleared)
     )
     :effect (and

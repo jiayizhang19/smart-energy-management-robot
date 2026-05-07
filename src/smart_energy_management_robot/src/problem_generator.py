@@ -5,12 +5,13 @@ import yaml
 import os
 import rclpy
 import time
+import subprocess
+import tempfile
 
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from plansys2_msgs.srv import AddProblem
-from plansys2_msgs.action import ExecutePlan
-from rclpy.action import ActionClient
+from plansys2_msgs.msg import ActionExecution
 
 
 class ProblemGenerator(Node):
@@ -18,15 +19,25 @@ class ProblemGenerator(Node):
     def __init__(self):
         super().__init__('problem_generator')
         self.waypoints = self._load_waypoint_names()
+        self.domain_path = os.path.join(
+            get_package_share_directory('smart_energy_management_robot'),
+            'pddl', 'domain.pddl'
+        )
         self.add_problem_cli = self.create_client(
-            AddProblem,
-            'problem_expert/add_problem'
+            AddProblem, 'problem_expert/add_problem'
         )
-        self.execute_plan_cli = ActionClient(
-            self,
-            ExecutePlan,
-            'executor/execute_plan'
+        # publish actions directly to actions_hub
+        self.action_pub = self.create_publisher(
+            ActionExecution, 'actions_hub', 10
         )
+        # subscribe to get responses from executor
+        self.action_sub = self.create_subscription(
+            ActionExecution, 'actions_hub',
+            self._action_response_cb, 10
+        )
+        self.current_step = 0
+        self.plan = []
+        self.waiting_for_response = False
 
     def _load_waypoint_names(self):
         pkg = get_package_share_directory('smart_energy_management_robot')
@@ -35,19 +46,10 @@ class ProblemGenerator(Node):
             data = yaml.safe_load(f)
         return list(data['waypoints'].keys())
 
-    def setup_and_trigger(self):
-        shuffled = random.sample(self.waypoints, len(self.waypoints))
-        start_wp    = shuffled[0]
-        critical_wp = shuffled[1]
-        high_wp     = shuffled[2]
-
-        self.get_logger().info(f'Start waypoint:    {start_wp}')
-        self.get_logger().info(f'Critical waypoint: {critical_wp}')
-        self.get_logger().info(f'High waypoint:     {high_wp}')
-
+    def _build_problem(self, start_wp, critical_wp, high_wp):
         objects = '  ' + ' '.join(self.waypoints) + ' - waypoint'
-
         init_lines = [f'  (robot_at {start_wp})']
+        init_lines.append(f'  (visited {start_wp})')
         init_lines.append('  (critical_energy_active)')
         init_lines.append('  (high_energy_active)')
         init_lines.append(f'  (is_critical_wp {critical_wp})')
@@ -57,14 +59,14 @@ class ProblemGenerator(Node):
                 if wp1 != wp2:
                     init_lines.append(f'  (connected {wp1} {wp2})')
 
-        # goal uses priorities_cleared instead of (not ...)
         goal_lines = ['  (and']
         for wp in self.waypoints:
-            goal_lines.append(f'    (visited {wp})')
+            if wp != start_wp:
+                goal_lines.append(f'    (visited {wp})')
         goal_lines.append('    (priorities_cleared)')
         goal_lines.append('  )')
 
-        problem = (
+        return (
             '(define (problem energy_problem)\n'
             '  (:domain energy_management)\n'
             '  (:objects\n'
@@ -79,51 +81,119 @@ class ProblemGenerator(Node):
             ')'
         )
 
-        self.get_logger().info(f'Problem:\n{problem}')
+    def _call_popf(self, problem_str):
+        """Call POPF directly, return list of (action, [args]) tuples."""
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.pddl', delete=False
+        ) as f:
+            f.write(problem_str)
+            problem_path = f.name
 
+        try:
+            result = subprocess.run(
+                ['/opt/ros/humble/lib/popf/popf',
+                 self.domain_path, problem_path],
+                capture_output=True, text=True, timeout=30
+            )
+            plan = []
+            for line in result.stdout.split('\n'):
+                # plan lines look like: 0.000: (visit_critical a b)  [0.001]
+                if ': (' in line and '[' in line:
+                    # extract action part between ( and )
+                    action_part = line.split('(')[1].split(')')[0].strip()
+                    parts = action_part.split()
+                    action_name = parts[0]
+                    args = parts[1:]
+                    plan.append((action_name, args))
+            return plan
+        finally:
+            os.unlink(problem_path)
+
+    def _dispatch_next_action(self):
+        """Dispatch the next action in the plan to the executor."""
+        if self.current_step >= len(self.plan):
+            self.get_logger().info('All actions completed successfully!')
+            return
+
+        action_name, args = self.plan[self.current_step]
+        self.get_logger().info(
+            f'Dispatching step {self.current_step + 1}/{len(self.plan)}: '
+            f'{action_name} {args}'
+        )
+
+        msg = ActionExecution()
+        msg.type = ActionExecution.REQUEST
+        msg.node_id = 'problem_generator'
+        msg.action = action_name
+        msg.arguments = args
+        msg.success = False
+        msg.completion = 0.0
+        msg.status = 'requested'
+        self.action_pub.publish(msg)
+        self.waiting_for_response = True
+
+    def _action_response_cb(self, msg):
+        """Handle responses from the action executor."""
+        # ignore our own requests
+        if msg.type == ActionExecution.REQUEST:
+            return
+        if msg.node_id == 'problem_generator':
+            return
+
+        if msg.type == ActionExecution.FINISH:
+            if msg.success:
+                self.get_logger().info(
+                    f'Action {msg.action} completed: {msg.status}'
+                )
+                self.current_step += 1
+                self.waiting_for_response = False
+                # dispatch next action
+                self._dispatch_next_action()
+            else:
+                self.get_logger().error(
+                    f'Action {msg.action} failed: {msg.status}'
+                )
+        elif msg.type == ActionExecution.FEEDBACK:
+            self.get_logger().info(
+                f'Action {msg.action} feedback: {msg.status} '
+                f'({msg.completion * 100:.0f}%)'
+            )
+
+    def setup_and_trigger(self):
+        shuffled = random.sample(self.waypoints, len(self.waypoints))
+        start_wp    = shuffled[0]
+        critical_wp = shuffled[1]
+        high_wp     = shuffled[2]
+
+        self.get_logger().info(f'Start waypoint:    {start_wp}')
+        self.get_logger().info(f'Critical waypoint: {critical_wp}')
+        self.get_logger().info(f'High waypoint:     {high_wp}')
+
+        problem = self._build_problem(start_wp, critical_wp, high_wp)
+
+        # verify with POPF
+        self.get_logger().info('Generating plan with POPF...')
+        self.plan = self._call_popf(problem)
+
+        if not self.plan:
+            self.get_logger().error('POPF could not generate a plan')
+            return
+
+        self.get_logger().info(f'Plan with {len(self.plan)} steps:')
+        for i, (action, args) in enumerate(self.plan):
+            self.get_logger().info(f'  {i+1}. {action} {args}')
+
+        # add problem to PlanSys2 for record keeping
         self.add_problem_cli.wait_for_service(timeout_sec=10.0)
         req = AddProblem.Request()
         req.problem = problem
         future = self.add_problem_cli.call_async(req)
         rclpy.spin_until_future_complete(self, future)
+        self.get_logger().info('Problem added to PlanSys2')
 
-        if future.result().success:
-            self.get_logger().info('Problem added successfully')
-            self._trigger_plan()
-        else:
-            self.get_logger().error(
-                f'Failed to add problem: {future.result().error_info}'
-            )
-
-    def _trigger_plan(self):
-        self.get_logger().info('Triggering plan execution...')
-        self.execute_plan_cli.wait_for_server(timeout_sec=10.0)
-        goal = ExecutePlan.Goal()
-        future = self.execute_plan_cli.send_goal_async(
-            goal,
-            feedback_callback=self._feedback_cb
-        )
-        future.add_done_callback(self._goal_response_cb)
-
-    def _goal_response_cb(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().error('Plan execution rejected')
-            return
-        self.get_logger().info('Plan execution accepted')
-        goal_handle.get_result_async().add_done_callback(self._result_cb)
-
-    def _feedback_cb(self, feedback):
-        self.get_logger().info(
-            f'Executing: {feedback.feedback.action_execution_status}'
-        )
-
-    def _result_cb(self, future):
-        result = future.result().result
-        if result.success:
-            self.get_logger().info('Plan completed successfully')
-        else:
-            self.get_logger().error(f'Plan failed: {result.error_info}')
+        # dispatch first action
+        self.current_step = 0
+        self._dispatch_next_action()
 
 
 def main():
