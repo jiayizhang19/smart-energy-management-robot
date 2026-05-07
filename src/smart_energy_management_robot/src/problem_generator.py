@@ -9,22 +9,33 @@ import subprocess
 import tempfile
 
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from ament_index_python.packages import get_package_share_directory
 from plansys2_msgs.srv import AddProblem
 from plansys2_msgs.msg import ActionExecution
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
+from nav2_msgs.action import NavigateToPose
 
-# Gazebo teleport service
 from gazebo_msgs.srv import SetEntityState
 from gazebo_msgs.msg import EntityState
+
+
+# -----------------------------------------------------------------------
+# SPAWN_WAYPOINT is the waypoint name closest to the Gazebo default spawn
+# position. The robot always starts here physically when Gazebo launches,
+# so we always publish /initialpose here first so AMCL can localise
+# correctly against the actual laser scan before any navigation begins.
+# Change this if your robot spawns at a different location.
+# -----------------------------------------------------------------------
+SPAWN_WAYPOINT = 'entrance'
 
 
 class ProblemGenerator(Node):
 
     def __init__(self):
         super().__init__('problem_generator')
-        self.waypoints_data = self._load_waypoints()       # {name: [x, y]}
-        self.waypoints = list(self.waypoints_data.keys())  # just names
+        self.waypoints_data = self._load_waypoints()
+        self.waypoints = list(self.waypoints_data.keys())
 
         self.domain_path = os.path.join(
             get_package_share_directory('smart_energy_management_robot'),
@@ -41,13 +52,10 @@ class ProblemGenerator(Node):
             ActionExecution, 'actions_hub',
             self._action_response_cb, 10
         )
-
-        # Publisher that replicates RViz "2D Pose Estimate"
         self.initial_pose_pub = self.create_publisher(
             PoseWithCovarianceStamped, 'initialpose', 10
         )
-
-        # Gazebo teleport client
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.set_entity_state_cli = self.create_client(
             SetEntityState, '/gazebo/set_entity_state'
         )
@@ -55,6 +63,8 @@ class ProblemGenerator(Node):
         self.current_step = 0
         self.plan = []
         self.waiting_for_response = False
+        self._start_nav_done = False
+        self._start_nav_success = False
 
     # ------------------------------------------------------------------
     # Data loading
@@ -68,50 +78,29 @@ class ProblemGenerator(Node):
         return data['waypoints']
 
     # ------------------------------------------------------------------
-    # Step 1 – physically move the robot in Gazebo
+    # Gazebo teleport (best-effort)
     # ------------------------------------------------------------------
 
-    def _teleport_robot(self, waypoint: str):
-        """
-        Move the TurtleBot3 model to the chosen waypoint coordinates inside
-        Gazebo. This ensures the laser scan matches the map so AMCL can
-        localise correctly without any manual RViz interaction.
-        """
+    def _teleport_robot(self, waypoint: str) -> bool:
         coords = self.waypoints_data[waypoint]
         x, y = float(coords[0]), float(coords[1])
 
-        if not self.set_entity_state_cli.wait_for_service(timeout_sec=5.0):
+        if not self.set_entity_state_cli.wait_for_service(timeout_sec=3.0):
             self.get_logger().warning(
-                '/gazebo/set_entity_state not available — '
-                'skipping Gazebo teleport. Robot may be mis-localised.'
+                '/gazebo/set_entity_state not available — skipping teleport.'
             )
-            return
+            return False
 
         state = EntityState()
-        state.name = 'turtlebot3_burger'   # Gazebo model name for burger
+        state.name = 'turtlebot3_burger'
         state.reference_frame = 'world'
-
         state.pose.position.x = x
         state.pose.position.y = y
         state.pose.position.z = 0.0
-
-        # Identity orientation – facing +x axis
-        state.pose.orientation.x = 0.0
-        state.pose.orientation.y = 0.0
-        state.pose.orientation.z = 0.0
         state.pose.orientation.w = 1.0
-
-        # Zero velocity so the robot does not drift after teleport
-        state.twist.linear.x  = 0.0
-        state.twist.linear.y  = 0.0
-        state.twist.linear.z  = 0.0
-        state.twist.angular.x = 0.0
-        state.twist.angular.y = 0.0
-        state.twist.angular.z = 0.0
 
         req = SetEntityState.Request()
         req.state = state
-
         future = self.set_entity_state_cli.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
 
@@ -119,20 +108,19 @@ class ProblemGenerator(Node):
             self.get_logger().info(
                 f'Gazebo: robot teleported to [{waypoint}] → x={x:.2f}, y={y:.2f}'
             )
-        else:
-            self.get_logger().warning(
-                'Gazebo teleport call returned failure or timed out.'
-            )
+            return True
+        self.get_logger().warning('Gazebo teleport failed.')
+        return False
 
     # ------------------------------------------------------------------
-    # Step 2 – tell AMCL where the robot now is
+    # AMCL initial pose
     # ------------------------------------------------------------------
 
     def _publish_initial_pose(self, waypoint: str):
         """
-        Publish /initialpose so AMCL reinitialises its particle filter at
-        the teleported position — identical to clicking '2D Pose Estimate'
-        in RViz but done programmatically after the physical teleport.
+        Publish /initialpose at the given waypoint's coordinates.
+        Only reliable when the robot is physically already at that location
+        so the laser scan matches the map there.
         """
         coords = self.waypoints_data[waypoint]
         x, y = float(coords[0]), float(coords[1])
@@ -140,27 +128,86 @@ class ProblemGenerator(Node):
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = 'map'
         msg.header.stamp = self.get_clock().now().to_msg()
-
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
         msg.pose.pose.position.z = 0.0
         msg.pose.pose.orientation.w = 1.0
 
-        # Standard RViz defaults: 0.25 m² on x/y, 0.07 rad² on yaw
         cov = [0.0] * 36
         cov[0]  = 0.25
         cov[7]  = 0.25
         cov[35] = 0.07
         msg.pose.covariance = cov
 
-        # Publish several times — topic is not latched
         for _ in range(10):
             self.initial_pose_pub.publish(msg)
             time.sleep(0.05)
 
         self.get_logger().info(
-            f'AMCL: initial pose set for [{waypoint}] → x={x:.2f}, y={y:.2f}'
+            f'AMCL: initial pose set at [{waypoint}] → x={x:.2f}, y={y:.2f}'
         )
+
+    # ------------------------------------------------------------------
+    # Navigate to waypoint — callback-based blocking wait
+    # ------------------------------------------------------------------
+
+    def _navigate_to(self, waypoint: str) -> bool:
+        """
+        Drive the robot to the given waypoint and block until it arrives.
+        Logs distance remaining so physical movement is visible in terminal.
+        """
+        coords = self.waypoints_data[waypoint]
+        x, y = float(coords[0]), float(coords[1])
+
+        self.get_logger().info(
+            f'Navigating to [{waypoint}] → x={x:.2f}, y={y:.2f}'
+        )
+
+        if not self.nav_client.wait_for_server(timeout_sec=30.0):
+            self.get_logger().error('Nav2 action server not available!')
+            return False
+
+        goal = NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = x
+        goal.pose.pose.position.y = y
+        goal.pose.pose.position.z = 0.0
+        goal.pose.pose.orientation.w = 1.0
+
+        self._start_nav_done = False
+        self._start_nav_success = False
+
+        send_future = self.nav_client.send_goal_async(
+            goal,
+            feedback_callback=self._nav_feedback_cb
+        )
+        send_future.add_done_callback(self._nav_goal_response_cb)
+
+        while not self._start_nav_done:
+            rclpy.spin_once(self, timeout_sec=0.5)
+
+        return self._start_nav_success
+
+    def _nav_goal_response_cb(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().error('Navigation goal rejected!')
+            self._start_nav_done = True
+            self._start_nav_success = False
+            return
+        self.get_logger().info('Navigation goal accepted.')
+        goal_handle.get_result_async().add_done_callback(self._nav_result_cb)
+
+    def _nav_result_cb(self, future):
+        self._start_nav_done = True
+        self._start_nav_success = True
+        self.get_logger().info('Navigation complete — robot has arrived.')
+
+    def _nav_feedback_cb(self, feedback_msg):
+        distance = feedback_msg.feedback.distance_remaining
+        self.get_logger().info(f'  Distance remaining: {distance:.2f} m')
 
     # ------------------------------------------------------------------
     # PDDL problem
@@ -292,21 +339,59 @@ class ProblemGenerator(Node):
         self.get_logger().info(f'Critical waypoint: {critical_wp}')
         self.get_logger().info(f'High waypoint:     {high_wp}')
 
-        # 1. Physically move the robot in Gazebo to the chosen start position.
-        #    This makes the laser scan match the map at that location.
-        self.get_logger().info('Teleporting robot in Gazebo...')
-        self._teleport_robot(start_wp)
+        # ------------------------------------------------------------------
+        # LOCALISATION FIRST
+        # The robot always physically spawns at SPAWN_WAYPOINT (entrance).
+        # Publish /initialpose there so AMCL localises against the actual
+        # laser scan. This must happen before any navigation.
+        # ------------------------------------------------------------------
+        self.get_logger().info(
+            f'Publishing spawn pose at [{SPAWN_WAYPOINT}] so AMCL can localise...'
+        )
+        self._publish_initial_pose(SPAWN_WAYPOINT)
+        self.get_logger().info('Waiting for AMCL to converge at spawn point...')
+        time.sleep(5.0)  # give AMCL time to match laser scan to map
 
-        # 2. Give Gazebo a moment to settle, then reinitialise AMCL.
-        time.sleep(1.0)
-        self.get_logger().info('Setting AMCL initial pose...')
-        self._publish_initial_pose(start_wp)
+        # ------------------------------------------------------------------
+        # NAVIGATE TO RANDOM START
+        # If start_wp differs from spawn, drive robot there now.
+        # Teleport is attempted first (instant); Nav2 is used as fallback.
+        # ------------------------------------------------------------------
+        if start_wp != SPAWN_WAYPOINT:
+            self.get_logger().info(
+                f'Start waypoint [{start_wp}] differs from spawn [{SPAWN_WAYPOINT}]'
+                f' — moving robot to start...'
+            )
 
-        # 3. Wait for AMCL particle filter to converge before sending nav goals.
-        self.get_logger().info('Waiting for AMCL to converge...')
-        time.sleep(3.0)
+            # Try Gazebo teleport first
+            teleported = self._teleport_robot(start_wp)
 
-        # 4. Build PDDL problem and generate plan.
+            if teleported:
+                # Teleport succeeded — update AMCL to new position
+                time.sleep(1.0)
+                self._publish_initial_pose(start_wp)
+                time.sleep(3.0)
+            else:
+                # Teleport unavailable — physically drive there via Nav2.
+                # AMCL is already localised at spawn so Nav2 can plan correctly.
+                arrived = self._navigate_to(start_wp)
+                if not arrived:
+                    self.get_logger().error(
+                        'Failed to reach start waypoint — aborting.'
+                    )
+                    return
+                # Re-publish pose after arrival
+                self._publish_initial_pose(start_wp)
+                time.sleep(1.0)
+        else:
+            self.get_logger().info(
+                f'Start waypoint is spawn point [{SPAWN_WAYPOINT}] — no movement needed.'
+            )
+
+        # ------------------------------------------------------------------
+        # GENERATE AND EXECUTE PLAN
+        # Robot is now physically at start_wp and AMCL is localised there.
+        # ------------------------------------------------------------------
         problem = self._build_problem(start_wp, critical_wp, high_wp)
         self.get_logger().info('Generating plan with POPF...')
         self.plan = self._call_popf(problem)
@@ -319,7 +404,6 @@ class ProblemGenerator(Node):
         for i, (action, args) in enumerate(self.plan):
             self.get_logger().info(f'  {i+1}. {action} {args}')
 
-        # 5. Register problem with PlanSys2 for record-keeping.
         self.add_problem_cli.wait_for_service(timeout_sec=10.0)
         req = AddProblem.Request()
         req.problem = problem
@@ -327,7 +411,6 @@ class ProblemGenerator(Node):
         rclpy.spin_until_future_complete(self, future)
         self.get_logger().info('Problem added to PlanSys2')
 
-        # 6. Dispatch the first action to the executor.
         self.current_step = 0
         self._dispatch_next_action()
 

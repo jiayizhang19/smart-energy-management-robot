@@ -75,33 +75,28 @@ ros2 service call /domain_expert/get_domain \
 ```
 You should see your domain PDDL returned in the response.
 
-Stage 2 - Set initial position in RViz
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run rviz2 rviz2 -d /opt/ros/humble/share/nav2_bringup/rviz/nav2_default_view.rviz
-```
-Click 2D Pose Estimate button on RViz, then click on the map and drag in the rough direction it faces.
-
-Stage 3 — Nav2
-Open another terminal:
+Stage 2 & 3 - Set initial position in RViz and bring up nav2
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/Zhang_25252980_EE650_ws/install/setup.bash
 export TURTLEBOT3_MODEL=burger
-ros2 launch nav2_bringup bringup_launch.py \
+ros2 launch turtlebot3_navigation2 navigation2.launch.py \
   map:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/Maps/house_explored.yaml \
   use_sim_time:=True
 ```
+Click 2D Pose Estimate button on RViz, then click on the map and drag in the rough direction it faces.
 
-Stage 4 - Get the location
+Stage 4 - teleop 
 ```bash
 source /opt/ros/humble/setup.bash
-ros2 topic echo /odom --once
+export TURTLEBOT3_MODEL=burger
+ros2 run turtlebot3_teleop teleop_keyboard
 ```
 
-Stage 5 - teleop 
+Stage 5 - Get the location
 ```bash
 source /opt/ros/humble/setup.bash
-ros2 run turtlebot3_teleop teleop_keyboard
+# ros2 topic echo /odom --once
+ros2 topic echo /amcl_pose --once
 ```
 

@@ -1,7 +1,16 @@
+# Odom waypoints:
+# waypoints:
+#   living_room:  [-2.84,  3.08]
+#   kitchen:      [-6.46,   -1.56]
+#   bedroom:      [3.10,  2.60]
+#   bathroom:      [6.42,   -2.76]
+#   entrance:     [-0.01, -2.91]
+#   balcony:      [-6.53,  3.06]
+# AMCL waypoints:
 waypoints:
-  living_room:  [-2.84,  3.08]
-  kitchen:      [-6.46,   -1.56]
-  bedroom:      [3.10,  2.60]
-  bathroom:      [6.42,   -2.76]
-  entrance:     [-0.01, -2.91]
-  balcony:      [-6.53,  3.06]
+  living_room:  [-2.6549,  3.1601]
+  kitchen:      [-6.3915,   -1.3060]
+  bedroom:      [4.6871,  2.7048]
+  bathroom:      [5.3185,   -2.6610]
+  entrance:     [-0.1108, -2.7031]
+  balcony:      [-6.2381,  3.2563]
