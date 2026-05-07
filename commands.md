@@ -92,7 +92,6 @@ ros2 launch nav2_bringup bringup_launch.py \
   map:=$HOME/Zhang_25252980_EE650_ws/src/smart_energy_management_robot/Maps/house_explored.yaml \
   use_sim_time:=True
 ```
-/amcl_pose is published by Nav2
 
 Stage 4 - Get the location
 ```bash
