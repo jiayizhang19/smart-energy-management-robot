@@ -12,5 +12,8 @@ waypoints:
   kitchen:      [-6.3915,   -1.3060]
   bedroom:      [4.6871,  2.7048]
   bathroom:      [5.3185,   -2.6610]
-  entrance:     [-0.1108, -2.7031]
+  # Center of the entrance
+  # entrance:     [-0.1108, -2.7031]
+  # default entrance position
+  entrance:     [-2.0128, -0.3868]
   balcony:      [-6.2381,  3.2563]

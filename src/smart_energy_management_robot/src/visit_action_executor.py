@@ -9,6 +9,7 @@ import time
 
 from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient
+from action_msgs.msg import GoalStatus
 from nav2_msgs.action import NavigateToPose
 from geometry_msgs.msg import PoseStamped
 from ament_index_python.packages import get_package_share_directory
@@ -106,7 +107,14 @@ class VisitActionExecutor(Node):
             f'Navigating to {waypoint} at {coords}'
         )
 
-        self.nav_client.wait_for_server()
+        if not self.nav_client.wait_for_server(timeout_sec=10.0):
+            self.get_logger().error('Nav2 action server not available')
+            from plansys2_msgs.msg import ActionExecution
+            self._send_response(
+                ActionExecution.FINISH, waypoint, 0.0, 'Nav server unavailable', False
+            )
+            return
+
         future = self.nav_client.send_goal_async(goal)
         future.add_done_callback(
             lambda f: self._nav_response_cb(f, waypoint)
@@ -126,6 +134,17 @@ class VisitActionExecutor(Node):
         )
 
     def _nav_result_cb(self, future, waypoint):
+        result = future.result()
+        if result.status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().error(
+                f'Navigation failed for {waypoint} (status={result.status})'
+            )
+            from plansys2_msgs.msg import ActionExecution
+            self._send_response(
+                ActionExecution.FINISH, waypoint, 0.0, 'Nav failed', False
+            )
+            return
+
         self.get_logger().info(f'Arrived at {waypoint}')
         from plansys2_msgs.msg import ActionExecution
         self._send_response(
