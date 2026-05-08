@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.join(
 ))
 from bt_nodes import create_inspection_tree
 
+VERBOSE_LOGS = os.getenv('SEMR_VERBOSE_LOGS', '').lower() in {'1', 'true', 'yes', 'on'}
+
 
 def load_waypoints():
     pkg = get_package_share_directory('smart_energy_management_robot')
@@ -157,6 +159,26 @@ class VisitActionExecutor(Node):
         tree = create_inspection_tree(waypoint)
         tree.setup_with_descendants()
         tree.tick_once()
+
+        bb = py_trees.blackboard.Client(name='VisitActionExecutor')
+        bb.register_key('occupied', access=py_trees.common.Access.READ)
+        bb.register_key('light_on', access=py_trees.common.Access.READ)
+        occupied = bb.occupied if hasattr(bb, 'occupied') else None
+        light_on = bb.light_on if hasattr(bb, 'light_on') else None
+        if occupied is not None and light_on is not None:
+            occ_state = 'OCCUPIED' if occupied else 'UNOCCUPIED'
+            light_state = 'ON' if light_on else 'OFF'
+            energy_state = 'WASTE' if (not occupied and light_on) else 'OK'
+            self.get_logger().info(
+                f'[{waypoint}] Occupancy: {occ_state} | Light: {light_state} | Energy: {energy_state}'
+            )
+        elif VERBOSE_LOGS:
+            if occupied is not None:
+                state = 'OCCUPIED' if occupied else 'UNOCCUPIED'
+                self.get_logger().info(f'[{waypoint}] Occupancy: {state}')
+            if light_on is not None:
+                state = 'ON' if light_on else 'OFF'
+                self.get_logger().info(f'[{waypoint}] Light: {state}')
 
         if tree.status == py_trees.common.Status.SUCCESS:
             self.get_logger().info(f'Inspection complete: {waypoint}')

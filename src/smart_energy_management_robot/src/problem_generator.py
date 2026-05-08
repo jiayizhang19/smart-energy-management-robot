@@ -235,6 +235,9 @@ class ProblemGenerator(Node):
         self.get_logger().info(f'Start waypoint:    {START_WAYPOINT} (fixed)')
         self.get_logger().info(f'Critical waypoint: {critical_wp}')
         self.get_logger().info(f'High waypoint:     {high_wp}')
+        self.get_logger().info(
+            f'Run summary: start={START_WAYPOINT}, critical={critical_wp}, high={high_wp}'
+        )
 
         # Publish initial pose at spawn location so AMCL localises correctly.
         # Robot is physically here — laser scan will match the map immediately.
@@ -257,6 +260,11 @@ class ProblemGenerator(Node):
         self.get_logger().info(f'Plan with {len(self.plan)} steps:')
         for i, (action, args) in enumerate(self.plan):
             self.get_logger().info(f'  {i+1}. {action} {args}')
+        sequence = ' -> '.join(
+            f'{i+1}:{action}({" ".join(args)})'
+            for i, (action, args) in enumerate(self.plan)
+        )
+        self.get_logger().info(f'Plan sequence: {sequence}')
 
         # Register with PlanSys2
         self.add_problem_cli.wait_for_service(timeout_sec=10.0)
