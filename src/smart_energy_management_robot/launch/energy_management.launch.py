@@ -8,24 +8,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def generate_launch_description():
     pkg = get_package_share_directory('smart_energy_management_robot')
-    pkg_nav2 = get_package_share_directory('nav2_bringup')
-    pkg_tb3 = get_package_share_directory('turtlebot3_gazebo')
-
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_tb3, 'launch', 'turtlebot3_house.launch.py')
-        )
-    )
-
-    nav2 = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_nav2, 'launch', 'bringup_launch.py')
-        ),
-        launch_arguments={
-            'map': os.path.join(pkg, 'Maps', 'house_explored.yaml'),
-            'use_sim_time': 'True',
-        }.items()
-    )
 
     plansys2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -55,8 +37,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        gazebo,
-        nav2,
         plansys2,
         executor,
         problem,

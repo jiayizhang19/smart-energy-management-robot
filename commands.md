@@ -1,3 +1,13 @@
+### Final command to run the program
+Step 1 - Rebuild
+Step 2 - Gazebo and Nav2
+Step 3 - Launch program
+```bash
+source /opt/ros/humble/setup.bash
+source ~/Zhang_25252980_EE650_ws/install/setup.bash
+ros2 launch smart_energy_management_robot energy_management.launch.py
+```
+
 ### Execution
 Stage 1 - Rebuild
 ```bash
@@ -99,4 +109,3 @@ source /opt/ros/humble/setup.bash
 # ros2 topic echo /odom --once
 ros2 topic echo /amcl_pose --once
 ```
-
