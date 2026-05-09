@@ -52,7 +52,6 @@ What you should see
 [visit_action_executor]: VisitActionExecutor ready
 # Then it waits silently for actions from PlanSys2.
 ```
-
 5. Problem Generator (trigger the plan)
 ```bash
 ros2 run smart_energy_management_robot problem_generator.py

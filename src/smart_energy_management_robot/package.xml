@@ -3,7 +3,7 @@
   <name>smart_energy_management_robot</name>
   <version>0.0.1</version>
   <description>Smart Energy Management Robot - EE650</description>
-  <maintainer email="jiayi_zhang@todo.todo">jiayi_zhang</maintainer>
+  <maintainer email="jiayi.zhang.2026@mumail.ie">jiayi_zhang</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>

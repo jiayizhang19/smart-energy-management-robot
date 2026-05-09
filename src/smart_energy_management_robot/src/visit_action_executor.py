@@ -14,6 +14,7 @@ from nav2_msgs.action import NavigateToPose
 from geometry_msgs.msg import PoseStamped
 from ament_index_python.packages import get_package_share_directory
 from plansys2_msgs.action import ExecutePlan
+from plansys2_msgs.msg import ActionExecution
 
 sys.path.insert(0, os.path.join(
     get_package_share_directory('smart_energy_management_robot'), 'src'
@@ -44,11 +45,8 @@ class VisitActionExecutor(Node):
 
         # create one action server per PDDL action
         # PlanSys2 calls these when executing the plan
-        from plansys2_msgs.action import ExecutePlan
         
         # use actions_hub topic approach with ActionExecution
-        from plansys2_msgs.msg import ActionExecution
-        
         self.action_sub = self.create_subscription(
             ActionExecution,
             'actions_hub',
@@ -65,8 +63,6 @@ class VisitActionExecutor(Node):
         self.get_logger().info('VisitActionExecutor ready')
 
     def _action_cb(self, msg):
-        from plansys2_msgs.msg import ActionExecution
-        
         if msg.type != ActionExecution.REQUEST:
             return
         if msg.action not in ['visit_critical', 'visit_high', 'visit_waypoint']:
@@ -91,7 +87,6 @@ class VisitActionExecutor(Node):
         coords = self.waypoints.get(waypoint)
         if coords is None:
             self.get_logger().error(f'Unknown waypoint: {waypoint}')
-            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Unknown waypoint', False
             )
@@ -111,7 +106,6 @@ class VisitActionExecutor(Node):
 
         if not self.nav_client.wait_for_server(timeout_sec=10.0):
             self.get_logger().error('Nav2 action server not available')
-            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Nav server unavailable', False
             )
@@ -126,7 +120,6 @@ class VisitActionExecutor(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error('Navigation rejected')
-            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Nav rejected', False
             )
@@ -141,21 +134,18 @@ class VisitActionExecutor(Node):
             self.get_logger().error(
                 f'Navigation failed for {waypoint} (status={result.status})'
             )
-            from plansys2_msgs.msg import ActionExecution
             self._send_response(
                 ActionExecution.FINISH, waypoint, 0.0, 'Nav failed', False
             )
             return
 
         self.get_logger().info(f'Arrived at {waypoint}')
-        from plansys2_msgs.msg import ActionExecution
         self._send_response(
             ActionExecution.FEEDBACK, waypoint, 0.5, 'Arrived, inspecting'
         )
         self._run_inspection(waypoint)
 
     def _run_inspection(self, waypoint: str):
-        from plansys2_msgs.msg import ActionExecution
         tree = create_inspection_tree(waypoint)
         tree.setup_with_descendants()
         tree.tick_once()
@@ -192,7 +182,6 @@ class VisitActionExecutor(Node):
             )
 
     def _send_response(self, msg_type, waypoint, completion, status, success=True):
-        from plansys2_msgs.msg import ActionExecution
         if self.current_action is None:
             return
         msg = ActionExecution()

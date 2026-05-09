@@ -2,4 +2,4 @@
 !.gitignore
 !src/
 !src/**
-!commands.md
+!readme.md
